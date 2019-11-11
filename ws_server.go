@@ -81,22 +81,15 @@ type wsMethod struct {
 	connectFunc CallbackFunc
 }
 
-//type clientFunc struct {
-//	look sync.Mutex
-//	c    chan *resultData
-//}
-
-//var Back = clientFunc{
-//	look: sync.Mutex{},
-//	c:    make(chan *resultData),
-//}
-
 func CallClientFunc(client *Client, waiter, method string, in map[string]interface{}) (map[string]interface{}, error) {
 	client.callLock.Lock()
 	defer func() {
 		client.callLock.Unlock()
 		recover()
 	}()
+	if client == nil {
+		return nil, errors.New("client is close")
+	}
 	rand := getRandString(4)
 	res, err := createCallData(waiter, method, rand, in)
 	if err != nil {
