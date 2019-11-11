@@ -58,10 +58,8 @@ func (w *WSRpcClient) Start() (*WSRpcClient, error) {
 	client, err := NewClient(w.conf, func(msg []byte) {
 		if res, ok := isResWsFunc(msg); ok {
 			w.back <- res
-			//logger.Debug("CallBack Msg: Client <<<<<<<<<<<< Server")
 		} else if res, ok := isCallWsFunc(msg); ok {
 			w.call <- res
-			//logger.Debug("CallFunc Msg: Client <<<<<<<<<<<< Server")
 		}
 	}, func(ws *WSClient, err error) {
 		for _, method := range w.disMethod {
@@ -91,7 +89,6 @@ func (w *WSRpcClient) backFunc() {
 			if err != nil {
 				break
 			}
-			//logger.Debug("CallFunc Msg: Client >>>>>>>>>>>> Server")
 			err = w.client.SendMessage(m)
 			if err != nil {
 				log.Println(err)
@@ -132,7 +129,6 @@ func (w *WSRpcClient) CallFunc(waiter, method string, in map[string]interface{})
 	if err != nil {
 		return nil, err
 	}
-	//logger.Debug("CallBack Msg: Client >>>>>>>>>>>> Server")
 	err = w.client.SendMessage(res)
 	if err != nil {
 		return nil, err

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const TimeOut = 3
+const TimeOut = 2
 const Ticker = 5
 
 type callData struct {

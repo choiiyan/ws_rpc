@@ -3,7 +3,6 @@ package ws_rpc
 import (
 	"errors"
 	"golang.org/x/crypto/bcrypt"
-	"sync"
 	"time"
 )
 
@@ -82,33 +81,35 @@ type wsMethod struct {
 	connectFunc CallbackFunc
 }
 
-type clientFunc struct {
-	look sync.Mutex
-	c    chan *resultData
-}
+//type clientFunc struct {
+//	look sync.Mutex
+//	c    chan *resultData
+//}
 
-var Back = clientFunc{
-	look: sync.Mutex{},
-	c:    make(chan *resultData),
-}
+//var Back = clientFunc{
+//	look: sync.Mutex{},
+//	c:    make(chan *resultData),
+//}
 
 func CallClientFunc(client *Client, waiter, method string, in map[string]interface{}) (map[string]interface{}, error) {
-	Back.look.Lock()
-	defer Back.look.Unlock()
+	client.callLock.Lock()
+	defer func() {
+		client.callLock.Unlock()
+		recover()
+	}()
 	rand := getRandString(4)
 	res, err := createCallData(waiter, method, rand, in)
 	if err != nil {
 		return nil, err
 	}
-	//logger.Debug("CallFunc Msg: Server >>>>>>>>>>>> Client")
 	SendMsgToClient(client, res)
-	t := time.NewTicker(time.Duration(5) * time.Second)
+	t := time.NewTicker(time.Duration(TimeOut) * time.Second)
 	defer func() {
 		t.Stop()
 	}()
 	for {
 		select {
-		case callback := <-Back.c:
+		case callback := <-client.callChan:
 			if callback.Random == rand &&
 				callback.Waiter == waiter &&
 				callback.Method == stringToLower(method) {
@@ -130,17 +131,14 @@ func (ws *wsMethod) OnConnect(client *Client) {
 func (ws *wsMethod) OnMessage(client *Client, msg []byte) {
 	if res, ok := isCallWsFunc(msg); ok {
 		//远程调用
-		//logger.Debug("CallBack Msg: Server <<<<<<<<<<<< Client")
 		out, err := ws.waiter[res.Waiter].RunMethod(res.Method, client, res.In)
 		m, err := createResultData(res, out, err)
 		if err != nil {
 			return
 		}
-		//logger.Debug("CallBack Msg: Server >>>>>>>>>>>> Client")
 		client.SendMsg(m)
 	} else if res, ok := isResWsFunc(msg); ok {
-		Back.c <- res
-		//logger.Debug("CallFunc Msg: Server <<<<<<<<<<<< Client")
+		client.callChan <- res
 	}
 }
 
