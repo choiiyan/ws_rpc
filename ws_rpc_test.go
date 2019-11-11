@@ -23,7 +23,7 @@ type ClientTest struct{}
 
 func (t *ClientTest) Test(c *Client, in map[string]interface{}) (map[string]interface{}, error) {
 	//客户端注册的方法 目标客户端,服务,方法,参数    返回:结果,错误
-	data, err := CallClientFunc(c, "test", "test", in)  //广播时使用协程可提高效率
+	data, err := CallClientFunc(c, "test", "test", in)
 	log.Println("CallClientFunc: ", data, err)
 	return in, nil
 }

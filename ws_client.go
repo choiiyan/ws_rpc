@@ -20,6 +20,7 @@ type WSRpcClient struct {
 	lock      sync.Mutex
 	disMethod []DisconnectFunc
 	err       chan error
+	isClose   bool
 }
 
 func NewWsRpcClient(host string, secret string) *WSRpcClient {
@@ -35,6 +36,7 @@ func NewWsRpcClient(host string, secret string) *WSRpcClient {
 	}
 	rpcClient.conf = conf
 	rpcClient.waiter = make(map[string]*Waiter)
+	rpcClient.isClose = false
 	return rpcClient
 }
 
@@ -52,9 +54,10 @@ func (w *WSRpcClient) DisconnectFunc(method ...DisconnectFunc) *WSRpcClient {
 func (w *WSRpcClient) Start() (*WSRpcClient, error) {
 	w.back = make(chan *resultData)
 	w.call = make(chan *callData)
-	w.callClose = make(chan bool)
-	w.err = make(chan error)
+	w.callClose = make(chan bool, 1)
+	w.err = make(chan error, 1)
 	w.lock = sync.Mutex{}
+	w.isClose = false
 	client, err := NewClient(w.conf, func(msg []byte) {
 		if res, ok := isResWsFunc(msg); ok {
 			w.back <- res
@@ -62,8 +65,11 @@ func (w *WSRpcClient) Start() (*WSRpcClient, error) {
 			w.call <- res
 		}
 	}, func(ws *WSClient, err error) {
-		for _, method := range w.disMethod {
-			method(w)
+		if w.client.isClose() == false {
+			w.disconnect()
+			for _, method := range w.disMethod {
+				method(w)
+			}
 		}
 	})
 	if err != nil {
@@ -77,7 +83,6 @@ func (w *WSRpcClient) Start() (*WSRpcClient, error) {
 	go w.backFunc()
 	return w, nil
 }
-
 
 func (w *WSRpcClient) backFunc() {
 	for {
@@ -102,13 +107,16 @@ func (w *WSRpcClient) backFunc() {
 }
 
 func (w *WSRpcClient) Close() {
-	w.client.Close()
-	close(w.back)
-	w.callClose <- true
+	if w.isClose == false {
+		w.client.Close()
+		close(w.back)
+		w.callClose <- true
+	}
+	w.isClose = true
 	w.err <- nil
 }
 
-func (w *WSRpcClient) Disconnect() {
+func (w *WSRpcClient) disconnect() {
 	w.client.Close()
 	close(w.back)
 	w.callClose <- true
@@ -138,7 +146,6 @@ func (w *WSRpcClient) CallFunc(waiter, method string, in map[string]interface{})
 	for {
 		select {
 		case callback := <-w.back:
-			//logger.Debug(jsonEncode(callback))
 			if callback.Random == rand &&
 				callback.Waiter == waiter &&
 				callback.Method == stringToLower(method) {

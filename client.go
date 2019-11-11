@@ -116,6 +116,9 @@ func (ws *WSClient) ping(ticket int) error {
 	defer t.Stop()
 	for {
 		<-t.C
+		if ws.isClose() == true {
+			return nil
+		}
 		err := ws.conn.WriteMessage(websocket.TextMessage, []byte(BEAT))
 		if err != nil {
 			return err

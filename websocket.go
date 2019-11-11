@@ -37,8 +37,9 @@ type Client struct {
 	//通道
 	writeLock sync.Mutex
 	//回调通道
-	callChan chan *resultData
-	callLock sync.Mutex
+	callChan      chan *resultData
+	callChanClose bool
+	callLock      sync.Mutex
 }
 
 //创建客户端组管理器
@@ -405,14 +406,15 @@ func WSStart(c Context, w WS) error {
 	uid, _ := uuid.NewV4()
 	//初始化一个客户端对象
 	client := &Client{
-		id:        uid.String(),
-		socket:    conn,
-		beat:      true,
-		Context:   c,
-		method:    w,
-		writeLock: sync.Mutex{},
-		callChan:  make(chan *resultData),
-		callLock:  sync.Mutex{},
+		id:            uid.String(),
+		socket:        conn,
+		beat:          true,
+		Context:       c,
+		method:        w,
+		writeLock:     sync.Mutex{},
+		callChan:      make(chan *resultData),
+		callChanClose: false,
+		callLock:      sync.Mutex{},
 	}
 	//把这个对象发送给 管道
 	manager.register <- client
@@ -446,6 +448,7 @@ func isHeartbeat(msg []byte) bool {
 //断开连接
 func (c *Client) onClose() {
 	c.method.OnClose(c)
+	c.callChanClose = true
 	close(c.callChan)
 }
 
