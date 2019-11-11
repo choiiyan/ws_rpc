@@ -78,13 +78,13 @@ func Start(conf SeverConf, client WS) error {
 		}
 		err := WSStart(context, client)
 		if err != nil {
-			log.Fatalln("update websocket err:", err)
+			log.Println("update websocket err:", err)
 		}
 	})
 	log.Println("WebSocket Server  port:" + port)
 	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
-		log.Fatalln("ListenAndServe:", err)
+		log.Println("ListenAndServe:", err)
 		return err
 	}
 	log.Println("WebSocket Server End")
