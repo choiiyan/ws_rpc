@@ -82,36 +82,38 @@ type wsMethod struct {
 }
 
 func CallClientFunc(client *Client, waiter, method string, in map[string]interface{}) (map[string]interface{}, error) {
-	client.callLock.Lock()
-	defer func() {
-		client.callLock.Unlock()
-		recover()
-	}()
 	if client == nil {
 		return nil, errors.New("client is close")
 	}
-	rand := getRandString(4)
-	res, err := createCallData(waiter, method, rand, in)
-	if err != nil {
-		return nil, err
-	}
-	SendMsgToClient(client, res)
-	t := time.NewTicker(time.Duration(TimeOut) * time.Second)
-	defer func() {
-		t.Stop()
-	}()
-	for {
-		select {
-		case callback := <-client.callChan:
-			if callback.Random == rand &&
-				callback.Waiter == waiter &&
-				callback.Method == stringToLower(method) {
-				return callback.Out, nil
-			}
-		case <-t.C:
-			return nil, errors.New("call func timeout")
+	return func() (map[string]interface{}, error) {
+		client.callLock.Lock()
+		defer func() {
+			client.callLock.Unlock()
+			recover()
+		}()
+		rand := getRandString(4)
+		res, err := createCallData(waiter, method, rand, in)
+		if err != nil {
+			return nil, err
 		}
-	}
+		SendMsgToClient(client, res)
+		t := time.NewTicker(time.Duration(TimeOut) * time.Second)
+		defer func() {
+			t.Stop()
+		}()
+		for {
+			select {
+			case callback := <-client.callChan:
+				if callback.Random == rand &&
+					callback.Waiter == waiter &&
+					callback.Method == stringToLower(method) {
+					return callback.Out, nil
+				}
+			case <-t.C:
+				return nil, errors.New("call func timeout")
+			}
+		}
+	}()
 }
 
 func (ws *wsMethod) OnConnect(client *Client) {
