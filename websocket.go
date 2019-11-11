@@ -462,6 +462,7 @@ func (c *Client) read() {
 	defer func() {
 		manager.unregister <- c
 		c.Close()
+		recover()
 	}()
 	c.onConnect() //调用创建时处理方法
 	for {
