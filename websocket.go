@@ -38,7 +38,6 @@ type Client struct {
 	writeLock sync.Mutex
 	//回调通道
 	callChan      chan *resultData
-	callChanClose bool
 	callLock      sync.Mutex
 }
 
@@ -413,7 +412,6 @@ func WSStart(c Context, w WS) error {
 		method:        w,
 		writeLock:     sync.Mutex{},
 		callChan:      make(chan *resultData),
-		callChanClose: false,
 		callLock:      sync.Mutex{},
 	}
 	//把这个对象发送给 管道
@@ -430,6 +428,9 @@ func (c *Client) onConnect() {
 
 //收到信息时处理
 func (c *Client) onMessage(msg []byte) {
+	defer func() {
+		recover()
+	}()
 	if isHeartbeat(msg) {
 		c.SendMsg(msg)
 		return
@@ -448,7 +449,6 @@ func isHeartbeat(msg []byte) bool {
 //断开连接
 func (c *Client) onClose() {
 	c.method.OnClose(c)
-	c.callChanClose = true
 	close(c.callChan)
 }
 

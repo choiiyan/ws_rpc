@@ -133,9 +133,6 @@ func (ws *wsMethod) OnMessage(client *Client, msg []byte) {
 		}
 		client.SendMsg(m)
 	} else if res, ok := isResWsFunc(msg); ok {
-		if client.callChanClose {
-			return
-		}
 		client.callChan <- res
 	}
 }
