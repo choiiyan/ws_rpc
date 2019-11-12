@@ -3,6 +3,7 @@ package ws_rpc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -23,7 +24,7 @@ type resultData struct {
 	Waiter string                 `json:"a"`
 	Method string                 `json:"b"`
 	Out    map[string]interface{} `json:"c"`
-	Err    error                  `json:"d"`
+	Err    string                 `json:"d"`
 	Random string                 `json:"e"`
 }
 
@@ -38,11 +39,15 @@ func createCallData(waiter, method, rand string, data map[string]interface{}) ([
 }
 
 func createResultData(call *callData, data map[string]interface{}, err error) ([]byte, error) {
+	errs := fmt.Sprint(err)
+	if errs == "<nil>" {
+		errs = ""
+	}
 	d := resultData{
 		Waiter: call.Waiter,
 		Method: call.Method,
 		Out:    data,
-		Err:    err,
+		Err:    errs,
 		Random: "r" + call.Random,
 	}
 	return encoder(&d)
@@ -96,7 +101,7 @@ func (w *Waiter) RunMethod(name string, c interface{}, in interface{}) (map[stri
 		}
 		return rel[0].Interface().(map[string]interface{}), err
 	}
-	return nil, errors.New("找不到方法")
+	return nil, errors.New("no method")
 }
 
 //运行客户端方法
@@ -117,7 +122,7 @@ func (w *Waiter) RunClientMethod(name string, in interface{}) (map[string]interf
 		}
 		return rel[0].Interface().(map[string]interface{}), err
 	}
-	return nil, errors.New("找不到方法")
+	return nil, errors.New("no method")
 }
 
 //创建服务
@@ -217,21 +222,16 @@ func decoder(data []byte, res interface{}) error {
 
 //转小写 例:AbcAbc--->abc_abc
 func stringToLower(str string) string {
-	b := make([]byte, len(str))
-	ii := 0
+	b := make([]byte, 0)
 	for i, _ := range str {
 		s := str[i]
 		if 'A' <= s && s <= 'Z' {
 			s = s - 'A' + 'a'
 			if i != 0 {
-				b[i] = '_'
-				ii++
+				b = append(b, '_')
 			}
-			b[i] = s
-		} else {
-			b[i] = s
 		}
-		ii++
+		b = append(b, s)
 	}
 	return string(b)
 }
@@ -251,7 +251,6 @@ func getRandString(len int) string {
 	}
 	return string(randStr)
 }
-
 
 func jsonEncode(j interface{}) string {
 	b, _ := json.Marshal(j)

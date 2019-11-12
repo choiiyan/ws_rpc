@@ -107,7 +107,13 @@ func CallClientFunc(client *Client, waiter, method string, in map[string]interfa
 				if callback.Random == rand &&
 					callback.Waiter == waiter &&
 					callback.Method == stringToLower(method) {
-					return callback.Out, nil
+					var err error
+					if callback.Err != "" {
+						err = errors.New(callback.Err)
+					} else {
+						err = nil
+					}
+					return callback.Out, err
 				}
 			case <-t.C:
 				return nil, errors.New("call func timeout")
@@ -126,7 +132,13 @@ func (ws *wsMethod) OnConnect(client *Client) {
 func (ws *wsMethod) OnMessage(client *Client, msg []byte) {
 	if res, ok := isCallWsFunc(msg); ok {
 		//远程调用
-		out, err := ws.waiter[res.Waiter].RunMethod(res.Method, client, res.In)
+		var err error
+		out := make(map[string]interface{})
+		if waiter, ok := ws.waiter[res.Waiter]; ok {
+			out, err = waiter.RunMethod(res.Method, client, res.In)
+		} else {
+			err = errors.New("no waiter")
+		}
 		m, err := createResultData(res, out, err)
 		if err != nil {
 			return

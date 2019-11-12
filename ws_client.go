@@ -89,7 +89,13 @@ func (w *WSRpcClient) backFunc() {
 		select {
 		case res := <-w.call:
 			//远程调用客户端Func
-			out, err := w.waiter[res.Waiter].RunClientMethod(res.Method, res.In)
+			var err error
+			out := make(map[string]interface{})
+			if waiter, ok := w.waiter[res.Waiter]; ok {
+				out, err = waiter.RunClientMethod(res.Method, res.In)
+			} else {
+				err = errors.New("no waiter")
+			}
 			m, err := createResultData(res, out, err)
 			if err != nil {
 				break
@@ -149,7 +155,13 @@ func (w *WSRpcClient) CallFunc(waiter, method string, in map[string]interface{})
 			if callback.Random == rand &&
 				callback.Waiter == waiter &&
 				callback.Method == stringToLower(method) {
-				return callback.Out, nil
+				var err error
+				if callback.Err != "" {
+					err = errors.New(callback.Err)
+				} else {
+					err = nil
+				}
+				return callback.Out, err
 			}
 		case <-t.C:
 			return nil, errors.New("call func timeout")
