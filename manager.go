@@ -7,6 +7,8 @@ import (
 
 //客户端管理
 type ClientManager struct {
+	//客户端组管理
+	groupManager sync.Map
 	//客户端 map 储存并管理所有的长连接client
 	clients sync.Map
 	//clients map[string]*Client
@@ -18,20 +20,19 @@ type ClientManager struct {
 	online int64
 }
 
-//创建客户端管理器
-var manager = ClientManager{
-	register:   make(chan *Client, 1),
-	unregister: make(chan *Client, 1),
-	clients:    sync.Map{},
-	online:     0,
-}
-
-//启动WS管理器
-func New(t int64) {
+//New WS管理器
+func NewManager(t int64) *ClientManager {
+	manager := new(ClientManager)
+	manager.register = make(chan *Client, 1)
+	manager.unregister = make(chan *Client, 1)
+	manager.clients = sync.Map{}
+	manager.groupManager = sync.Map{}
+	manager.online = 0
 	go manager.start()
 	if t > 0 {
 		go manager.beat(t) //开启心跳检测
 	}
+	return manager
 }
 
 //心跳检测 每秒遍历一次

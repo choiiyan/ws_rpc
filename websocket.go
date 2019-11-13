@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 )
 
 type WS interface {
@@ -37,12 +38,10 @@ type Client struct {
 	//通道
 	writeLock sync.Mutex
 	//回调通道
-	callChan      chan *resultData
-	callLock      sync.Mutex
+	callChan chan *resultData
+	callLock sync.Mutex
+	Manager  *ClientManager
 }
-
-//创建客户端组管理器
-var groupManager = sync.Map{}
 
 //定义心跳消息
 const BEAT = "@"
@@ -52,37 +51,57 @@ type SeverConf struct {
 	Port   int64
 	Path   string
 	Ticker int64
-	method []MiddlewareFunc
 }
 
 type MiddlewareFunc func(c Context) error
 
-func (s *SeverConf) MiddlewareFunc(method ...MiddlewareFunc) {
-	s.method = append(s.method, method...)
+type wsWeb struct {
+	serve   *http.ServeMux
+	cfg     SeverConf
+	client  WS
+	method  []MiddlewareFunc
+	Manager *ClientManager
 }
 
 //独立websocket服务
-func Start(conf SeverConf, client WS) error {
-	port := fmt.Sprint(conf.Port)
-	if conf.Path == "" {
-		conf.Path = "/"
+func NewWsServer(conf SeverConf, client WS) *wsWeb {
+	server := new(wsWeb)
+	server.cfg = conf
+	server.client = client
+	server.serve = http.NewServeMux()
+	return server
+}
+
+func (ws *wsWeb) MiddlewareFunc(method ...MiddlewareFunc) {
+	ws.method = append(ws.method, method...)
+}
+
+func (ws *wsWeb) Start() error {
+	port := fmt.Sprint(ws.cfg.Port)
+	if ws.cfg.Path == "" {
+		ws.cfg.Path = "/"
 	}
-	New(conf.Ticker)
-	http.HandleFunc(conf.Path, func(w http.ResponseWriter, r *http.Request) {
+	ws.Manager = NewManager(ws.cfg.Ticker)
+	ws.serve.HandleFunc(ws.cfg.Path, func(w http.ResponseWriter, r *http.Request) {
 		context := NewContext(w, r)
-		for _, m := range conf.method {
+		for _, m := range ws.method {
 			err := m(context)
 			if err != nil {
 				return
 			}
 		}
-		err := WSStart(context, client)
+		err := WSStart(context, ws.Manager, ws.client)
 		if err != nil {
 			log.Println("update websocket err:", err)
 		}
 	})
-	log.Println("WebSocket Server  port:" + port)
-	err := http.ListenAndServe(":"+port, nil)
+	//log.Println("WebSocket Server  port:" + port)
+	server := &http.Server{
+		Addr:         ":" + port,
+		WriteTimeout: time.Second * 3, //设置3秒的写超时
+		Handler:      ws.serve,
+	}
+	err := server.ListenAndServe()
 	if err != nil {
 		log.Println("ListenAndServe:", err)
 		return err
@@ -94,22 +113,22 @@ func Start(conf SeverConf, client WS) error {
 /*************方法用消息发送***************/
 
 //发送消息到client对象
-func SendMsgToClient(to *Client, msg []byte) {
+func (manager *ClientManager) SendMsgToClient(to *Client, msg []byte) {
 	if to != nil {
 		to.SendMsg(msg)
 	}
 }
 
 //发送消息到uid
-func SendMsgToUid(uid int64, msg []byte) {
+func (manager *ClientManager) SendMsgToUid(uid int64, msg []byte) {
 	if client, ok := uidToClient.Load(uid); ok {
 		client.(*Client).SendMsg(msg)
 	}
 }
 
 //群发组消息
-func SendMsgToGroup(gid int64, msg []byte) {
-	if group, ok := groupManager.Load(gid); ok {
+func (manager *ClientManager) SendMsgToGroup(gid int64, msg []byte) {
+	if group, ok := manager.groupManager.Load(gid); ok {
 		//数据遍历成员
 		group.(*sync.Map).Range(func(k, v interface{}) bool {
 			if k.(string) != "len" {
@@ -121,7 +140,7 @@ func SendMsgToGroup(gid int64, msg []byte) {
 }
 
 //发送消息给所以用户
-func SendMsgToAll(msg []byte) {
+func (manager *ClientManager) SendMsgToAll(msg []byte) {
 	go func() {
 		manager.clients.Range(func(k, v interface{}) bool {
 			if conn, ok := v.(*Client); ok {
@@ -133,14 +152,14 @@ func SendMsgToAll(msg []byte) {
 }
 
 //获取连接数
-func GetOnline() int64 {
+func (manager *ClientManager) GetOnline() int64 {
 	return manager.online
 }
 
 //获取组成员数量
-func GetGroupUserCount(gid int64) int64 {
+func (manager *ClientManager) GetGroupUserCount(gid int64) int64 {
 	count := int64(0)
-	if group, ok := groupManager.Load(gid); ok {
+	if group, ok := manager.groupManager.Load(gid); ok {
 		if groupLen, ok := group.(*sync.Map).Load("len"); ok {
 			//数据遍历,成员退出组
 			count = groupLen.(int64)
@@ -213,7 +232,7 @@ func (c *Client) SendMsgToUid(uid interface{}, msg []byte) {
 //发送消息给所以用户
 func (c *Client) SendMsgToAll(msg []byte) {
 	go func() {
-		manager.clients.Range(func(k, v interface{}) bool {
+		c.Manager.clients.Range(func(k, v interface{}) bool {
 			if conn, ok := v.(*Client); ok {
 				conn.SendMsg(msg)
 			}
@@ -225,7 +244,7 @@ func (c *Client) SendMsgToAll(msg []byte) {
 //发送消息到除加入组的用户
 func (c *Client) SendMsgNoGroup(msg []byte) {
 	go func() { //通过协程发送消息
-		manager.clients.Range(func(k, v interface{}) bool {
+		c.Manager.clients.Range(func(k, v interface{}) bool {
 			if conn, ok := v.(*Client); ok {
 				if conn.group == 0 {
 					conn.SendMsg(msg)
@@ -243,7 +262,7 @@ func (c *Client) AddGroup(gid int64) {
 	}
 	c.group = gid
 	if gid > 0 {
-		if group, ok := groupManager.Load(gid); ok {
+		if group, ok := c.Manager.groupManager.Load(gid); ok {
 			group.(*sync.Map).Store(c.id, c)
 			if count, ok := group.(*sync.Map).Load("len"); ok {
 				group.(*sync.Map).Store("len", count.(int64)+1)
@@ -253,7 +272,7 @@ func (c *Client) AddGroup(gid int64) {
 			g := &sync.Map{}
 			g.Store(c.id, c)
 			g.Store("len", int64(1))
-			groupManager.Store(gid, g)
+			c.Manager.groupManager.Store(gid, g)
 		}
 	}
 }
@@ -264,7 +283,7 @@ func (c *Client) ExitGroup() {
 		return
 	}
 	if c.group > 0 {
-		if group, ok := groupManager.Load(c.group); ok {
+		if group, ok := c.Manager.groupManager.Load(c.group); ok {
 			group.(*sync.Map).Delete(c.id)
 			if count, ok := group.(*sync.Map).Load("len"); ok {
 				if count.(int64) == 1 {
@@ -282,7 +301,7 @@ func (c *Client) ExitGroup() {
 //删除组
 func (c *Client) RemoveGroup(gid int64) {
 	if gid > 0 {
-		if group, ok := groupManager.Load(gid); ok {
+		if group, ok := c.Manager.groupManager.Load(gid); ok {
 			//数据遍历,成员退出组
 			group.(*sync.Map).Range(func(k, v interface{}) bool {
 				if k.(string) != "len" {
@@ -290,7 +309,7 @@ func (c *Client) RemoveGroup(gid int64) {
 				}
 				return true
 			})
-			groupManager.Delete(gid)
+			c.Manager.groupManager.Delete(gid)
 		}
 	}
 }
@@ -330,7 +349,7 @@ func (c *Client) SendMsg(msg []byte) {
 //群发组消息
 func (c *Client) SendMsgToGroup(msg []byte) {
 	if c.group > 0 {
-		if group, ok := groupManager.Load(c.group); ok {
+		if group, ok := c.Manager.groupManager.Load(c.group); ok {
 			//数据遍历成员
 			group.(*sync.Map).Range(func(k, v interface{}) bool {
 				if k.(string) != "len" {
@@ -348,7 +367,7 @@ func (c *Client) SendMsgToGroupNoOwn(msg []byte) {
 		return
 	}
 	if c.group > 0 {
-		if group, ok := groupManager.Load(c.group); ok {
+		if group, ok := c.Manager.groupManager.Load(c.group); ok {
 			//数据遍历,成员退出组
 			group.(*sync.Map).Range(func(k, v interface{}) bool {
 				if k.(string) != c.id && k.(string) != "len" {
@@ -363,7 +382,7 @@ func (c *Client) SendMsgToGroupNoOwn(msg []byte) {
 //群发消息
 func (c *Client) BroadcastMsg(msg []byte) {
 	//遍历已经连接的客户端，把消息发送给他们
-	manager.clients.Range(func(k, v interface{}) bool {
+	c.Manager.clients.Range(func(k, v interface{}) bool {
 		if conn, ok := v.(*Client); ok {
 			conn.write(msg)
 		}
@@ -377,7 +396,7 @@ func (c *Client) BroadcastMsgNoOwn(msg []byte) {
 		return
 	}
 	//遍历已经连接的客户端，把消息发送给他们
-	manager.clients.Range(func(k, v interface{}) bool {
+	c.Manager.clients.Range(func(k, v interface{}) bool {
 		if conn, ok := v.(*Client); ok {
 			//不给自己
 			if conn != c {
@@ -396,7 +415,7 @@ var upgrade = websocket.Upgrader{
 }
 
 //解析WS连接
-func WSStart(c Context, w WS) error {
+func WSStart(c Context, manager *ClientManager, w WS) error {
 	//解析ws连接
 	conn, err := upgrade.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
@@ -405,14 +424,15 @@ func WSStart(c Context, w WS) error {
 	uid, _ := uuid.NewV4()
 	//初始化一个客户端对象
 	client := &Client{
-		id:            uid.String(),
-		socket:        conn,
-		beat:          true,
-		Context:       c,
-		method:        w,
-		writeLock:     sync.Mutex{},
-		callChan:      make(chan *resultData),
-		callLock:      sync.Mutex{},
+		id:        uid.String(),
+		socket:    conn,
+		beat:      true,
+		Context:   c,
+		method:    w,
+		writeLock: sync.Mutex{},
+		callChan:  make(chan *resultData),
+		callLock:  sync.Mutex{},
+		Manager:   manager,
 	}
 	//把这个对象发送给 管道
 	manager.register <- client
@@ -463,7 +483,7 @@ func (c *Client) Close() {
 //定义客户端结构体的read方法
 func (c *Client) read() {
 	defer func() {
-		manager.unregister <- c
+		c.Manager.unregister <- c
 		c.Close()
 		recover()
 	}()
@@ -473,7 +493,7 @@ func (c *Client) read() {
 		_, message, err := c.socket.ReadMessage()
 		//如果有错误信息，就注销这个连接然后关闭
 		if err != nil {
-			manager.unregister <- c
+			c.Manager.unregister <- c
 			c.Close()
 			return
 		}
@@ -494,7 +514,7 @@ func (c *Client) write(message []byte) {
 	err := c.socket.WriteMessage(websocket.TextMessage, message)
 	//写不成功数据就关闭
 	if err != nil {
-		manager.unregister <- c
+		c.Manager.unregister <- c
 		c.Close()
 		return
 	}

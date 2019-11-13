@@ -2,19 +2,21 @@ package ws_rpc
 
 import (
 	"errors"
-	"fmt"
 	"github.com/gorilla/websocket"
+	"log"
+	"sync"
 	"time"
 )
 
 type OnCloseFunc func(ws *WSClient, err error)
 
 type WSClient struct {
-	conn    *websocket.Conn
-	conf    ClientConf
-	method  func(message []byte)
-	onClose OnCloseFunc
-	close   bool
+	conn       *websocket.Conn
+	conf       ClientConf
+	method     func(message []byte)
+	onClose    OnCloseFunc
+	writieLock sync.Mutex
+	close      bool
 }
 
 //客户端配置
@@ -48,7 +50,9 @@ func (ws *WSClient) SendMessage(data []byte) error {
 	if ws.conn == nil {
 		return errors.New("client is close")
 	}
+	ws.writieLock.Lock()
 	err = ws.conn.WriteMessage(websocket.TextMessage, data)
+	ws.writieLock.Unlock()
 	return err
 }
 
@@ -62,6 +66,7 @@ func (ws *WSClient) Close() {
 
 func (ws *WSClient) start() error {
 	ws.close = false
+	ws.writieLock = sync.Mutex{}
 	if ws.conn != nil {
 		ws.conn.Close()
 	}
@@ -109,7 +114,7 @@ func isPing(msg []byte) bool {
 func (ws *WSClient) ping(ticket int) error {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 	}()
 	t := time.NewTicker(time.Duration(ticket) * time.Second)
@@ -119,10 +124,11 @@ func (ws *WSClient) ping(ticket int) error {
 		if ws.isClose() == true {
 			return nil
 		}
+		ws.writieLock.Lock()
 		err := ws.conn.WriteMessage(websocket.TextMessage, []byte(BEAT))
+		ws.writieLock.Unlock()
 		if err != nil {
 			return err
 		}
 	}
-
 }

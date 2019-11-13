@@ -54,7 +54,12 @@ func (s *WsServerConf) Start() error {
 		Ticker: s.ticker,
 	}
 	hashLoop := NewHashLoop(1000)
-	conf.MiddlewareFunc(func(c Context) error {
+	ws := NewWsServer(conf, &wsMethod{
+		waiter:      s.waiter,
+		closeFunc:   s.closeFunc,
+		connectFunc: s.connectFunc,
+	})
+	ws.MiddlewareFunc(func(c Context) error {
 		token := c.GetFrom()["token"]
 		err := bcrypt.CompareHashAndPassword([]byte(token), []byte(s.secret))
 		if err != nil {
@@ -65,13 +70,9 @@ func (s *WsServerConf) Start() error {
 		}
 		return nil
 	})
-	conf.MiddlewareFunc(s.method...)
+	ws.MiddlewareFunc(s.method...)
 	//启动服务
-	err := Start(conf, &wsMethod{
-		waiter:      s.waiter,
-		closeFunc:   s.closeFunc,
-		connectFunc: s.connectFunc,
-	})
+	err := ws.Start()
 	return err
 }
 
@@ -96,7 +97,7 @@ func CallClientFunc(client *Client, waiter, method string, in map[string]interfa
 		if err != nil {
 			return nil, err
 		}
-		SendMsgToClient(client, res)
+		client.Manager.SendMsgToClient(client, res)
 		t := time.NewTicker(time.Duration(TimeOut) * time.Second)
 		defer func() {
 			t.Stop()
@@ -136,6 +137,7 @@ func (ws *wsMethod) OnMessage(client *Client, msg []byte) {
 		out := make(map[string]interface{})
 		if waiter, ok := ws.waiter[res.Waiter]; ok {
 			out, err = waiter.RunMethod(res.Method, client, res.In)
+
 		} else {
 			err = errors.New("no waiter")
 		}

@@ -4,7 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/crypto/bcrypt"
-	"qingliao/extension/tools"
+	"log"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -13,49 +14,13 @@ import (
 type ws struct {
 }
 
-func TestServer(t *testing.T) {
-	conf := SeverConf{
-		Port:   38888,
-		Path:   "/",
-		Ticker: 5,
-	}
-	secret := "MyDarkSecret"
-	hashLoop := tools.NewHashLoop(1000)
-	conf.MiddlewareFunc(func(c Context) error {
-		token := c.GetFrom()["token"]
-		err := bcrypt.CompareHashAndPassword([]byte(token), []byte(secret))
-		if err != nil {
-			return err
-		}
-		if !hashLoop.Loop(token) {
-			return errors.New("key has been used")
-		}
-		return nil
-	})
-	//启动服务
-	err := Start(conf, &ws{})
-	fmt.Println(err)
-}
-
-func ShowIp(c Context) error {
-	c.Set("key", c.Request().RemoteAddr)
-	return nil
-}
-
-func Secret(c Context) error {
-	password := []byte("MyDarkSecret")
-	// Comparing the password with the hash
-	err := bcrypt.CompareHashAndPassword([]byte(c.GetFrom()["token"]), password)
-	fmt.Println(err) //
-	return nil
-}
-
 //创建连接
 func (ws *ws) OnConnect(client *Client) {
 }
 
 //收到信息时处理
 func (ws *ws) OnMessage(client *Client, msg []byte) {
+	log.Println(string(msg))
 	client.SendMsg(msg)
 }
 
@@ -63,28 +28,37 @@ func (ws *ws) OnMessage(client *Client, msg []byte) {
 func (ws *ws) OnClose(client *Client) {
 }
 
-func TestServer2(t *testing.T) {
+//WS管理
+var WSManager *ClientManager
+
+//WS服务器
+func TestServer(t *testing.T) {
 	conf := SeverConf{
-		Port:   38888,
+		Port:   48888,
 		Path:   "/",
 		Ticker: 5,
 	}
-	secret := "MyDarkSecret"
-	hashLoop := tools.NewHashLoop(1000)
-	conf.MiddlewareFunc(func(c Context) error {
-		token := c.GetFrom()["token"]
-		err := bcrypt.CompareHashAndPassword([]byte(token), []byte(secret))
-		if err != nil {
-			return err
-		}
-		if !hashLoop.Loop(token) {
-			return errors.New("key has been used")
-		}
-		return nil
-	})
-	//启动服务
-	err := Start(conf, &ws{})
+	log.Println("server start")
+	ws := NewWsServer(conf, &ws{})
+	//管理
+	WSManager = ws.Manager
+	ws.MiddlewareFunc(VerifyToken)
+	err := ws.Start()
 	fmt.Println(err)
+}
+
+var hashLoop = NewHashLoop(1000)
+func VerifyToken(c Context) error {
+	secret := "MyDarkSecret"
+	token := c.GetFrom()["token"]
+	err := bcrypt.CompareHashAndPassword([]byte(token), []byte(secret))
+	if err != nil {
+		return err
+	}
+	if !hashLoop.Loop(token) {
+		return errors.New("key has been used")
+	}
+	return nil
 }
 
 func TestClient(t *testing.T) {
@@ -103,7 +77,7 @@ func TestClient(t *testing.T) {
 func startClient() {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 	}()
 	password := []byte("MyDarkSecret")
@@ -113,31 +87,34 @@ func startClient() {
 	}
 
 	conf := ClientConf{
-		Host:   "127.0.0.1:38888",
+		Host:   "127.0.0.1:48888",
 		Path:   "/?token=" + string(hashedPassword),
 		Ticker: 5,
 	}
-	client, err := NewClient(conf, callback,nil)
+	client, err := NewClient(conf, callback, nil)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	go func() {
 		time.Sleep(time.Duration(60*10) * time.Second)
 		client.Close()
 	}()
-	ticket := time.NewTicker(time.Duration(1) * time.Second)
+	ticket := time.NewTicker(time.Duration(50) * time.Microsecond)
+	i := 0
 	defer ticket.Stop()
 	for {
 		<-ticket.C
-		err := client.SendMessage([]byte("sss"))
+		i++
+		msg := "test " + strconv.Itoa(i)
+		err := client.SendMessage([]byte(msg))
 		if err != nil {
-			//fmt.Println("err:", err)
+			log.Println("err:", err)
 			return
 		}
 	}
 }
 
 func callback(msg []byte) {
-	//fmt.Println(string(msg))
+	fmt.Println(string(msg))
 }

@@ -42,7 +42,7 @@ func TestNewWsRpcClient(t *testing.T) {
 	//调用服务端注册的方法
 	data, err := client.CallFunc("test", "test",
 		map[string]interface{}{
-			"in": "sss",
+			"in": "test",
 		})
 	log.Println(data, err)
 	log.Println("Done")
@@ -55,7 +55,6 @@ func TestNewWsRpcClient(t *testing.T) {
 
 func Disconnect(w *WSRpcClient) {
 	log.Println("Disconnect...")
-	w.Disconnect()
 }
 
 type Callback struct{}
