@@ -62,7 +62,6 @@ func TestNewWsRpcClient(t *testing.T) {
 
 func Disconnect(w *WSRpcClient) {
 	log.Println("Disconnect...")
-	w.Disconnect()
 }
 
 type Callback struct{}
