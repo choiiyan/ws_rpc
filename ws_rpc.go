@@ -11,7 +11,7 @@ import (
 )
 
 const TimeOut = 2
-const Ticker = 5
+const Ticker = 60
 
 type callData struct {
 	Waiter string                 `json:"a"`
