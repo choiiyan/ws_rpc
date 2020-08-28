@@ -113,6 +113,11 @@ func (w *WSRpcClient) backFunc() {
 }
 
 func (w *WSRpcClient) Close() {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println(err)
+		}
+	}()
 	if w.isClose == false {
 		w.client.Close()
 		close(w.back)
